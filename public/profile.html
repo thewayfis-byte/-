@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Профиль - Wayfis</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <header>
+        <div class="container">
+            <nav class="navbar navbar-expand-lg">
+                <a class="navbar-brand" href="/">Wayfis</a>
+                <div class="navbar-buttons ms-auto">
+                    <a href="/profile" class="btn btn-outline">Профиль</a>
+                    <a href="/logout" class="btn btn-primary">Выход</a>
+                </div>
+            </nav>
+        </div>
+    </header>
+
+    <div class="container py-5">
+        <div class="row">
+            <div class="col-md-8 mx-auto">
+                <div class="card shadow">
+                    <div class="card-header">
+                        <h3 class="mb-0">Мой профиль</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label class="form-label">Имя пользователя</label>
+                            <input type="text" class="form-control" id="username" readonly>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Email</label>
+                            <input type="email" class="form-control" id="email" readonly>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Дата регистрации</label>
+                            <input type="text" class="form-control" id="created-at" readonly>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Баланс</label>
+                            <input type="text" class="form-control" id="balance" readonly>
+                        </div>
+                        
+                        <div class="mt-4">
+                            <h4>Мои заказы</h4>
+                            <div class="table-responsive">
+                                <table class="table table-striped">
+                                    <thead>
+                                        <tr>
+                                            <th>ID</th>
+                                            <th>Продукт</th>
+                                            <th>Статус</th>
+                                            <th>Дата</th>
+                                            <th>Цена</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="orders-table">
+                                        <tr>
+                                            <td colspan="5" class="text-center">Загрузка...</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        async function loadProfile() {
+            try {
+                const response = await fetch('/api/profile', {
+                    headers: {
+                        'Authorization': 'Bearer ' + localStorage.getItem('token')
+                    }
+                });
+                
+                if (response.ok) {
+                    const profile = await response.json();
+                    document.getElementById('username').value = profile.username;
+                    document.getElementById('email').value = profile.email;
+                    document.getElementById('created-at').value = new Date(profile.created_at).toLocaleDateString();
+                    document.getElementById('balance').value = profile.balance + ' ₽';
+                } else {
+                    window.location.href = '/login';
+                }
+            } catch (error) {
+                console.error('Error loading profile:', error);
+                window.location.href = '/login';
+            }
+        }
+
+        async function loadOrders() {
+            try {
+                const response = await fetch('/api/orders', {
+                    headers: {
+                        'Authorization': 'Bearer ' + localStorage.getItem('token')
+                    }
+                });
+                
+                if (response.ok) {
+                    const orders = await response.json();
+                    const tbody = document.getElementById('orders-table');
+                    
+                    if (orders.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="5" class="text-center">У вас пока нет заказов</td></tr>';
+                        return;
+                    }
+                    
+                    tbody.innerHTML = '';
+                    orders.forEach(order => {
+                        const row = document.createElement('tr');
+                        row.innerHTML = `
+                            <td>${order.id}</td>
+                            <td>${order.product_name}</td>
+                            <td>
+                                <span class="badge ${
+                                    order.status === 'paid' ? 'bg-success' : 
+                                    order.status === 'pending' ? 'bg-warning' : 'bg-secondary'
+                                }">
+                                    ${order.status === 'paid' ? 'Оплачен' : 
+                                      order.status === 'pending' ? 'Ожидает' : 'Неизвестен'}
+                                </span>
+                            </td>
+                            <td>${new Date(order.created_at).toLocaleDateString()}</td>
+                            <td>${order.price} ₽</td>
+                        `;
+                        tbody.appendChild(row);
+                    });
+                } else {
+                    window.location.href = '/login';
+                }
+            } catch (error) {
+                console.error('Error loading orders:', error);
+                window.location.href = '/login';
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            loadProfile();
+            loadOrders();
+        });
+    </script>
+</body>
+</html>
