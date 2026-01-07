@@ -459,58 +459,93 @@ app.post('/yookassa-webhook', express.json(), async (req, res) => {
 
 
 app.get('/', (req, res) => {
-  res.redirect('/login');
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 app.get('/login', (req, res) => {
-  const error = req.query.error || '';
-  res.send(`
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <title>Вход в админку - Wayfis</title>
-      <meta charset="utf-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1">
-      <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-      <style>
-        body { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; }
-        .login-card { background: white; border-radius: 15px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); }
-      </style>
-    </head>
-    <body>
-      <div class="container d-flex align-items-center justify-content-center min-vh-100">
-        <div class="col-md-6 col-lg-5">
-          <div class="login-card p-5">
-            <h2 class="text-center mb-4">🔐 Вход в админку</h2>
-            ${error ? `<div class="alert alert-danger">${error}</div>` : ''}
-            <form method="POST" action="/login">
-              <div class="mb-3">
-                <label class="form-label">Логин</label>
-                <input type="text" name="username" class="form-control" required>
-              </div>
-              <div class="mb-3">
-                <label class="form-label">Пароль</label>
-                <input type="password" name="password" class="form-control" required>
-              </div>
-              <button type="submit" class="btn btn-primary w-100">Войти</button>
-            </form>
-          </div>
-        </div>
-      </div>
-    </body>
-    </html>
-  `);
-});
-app.post('/login', (req, res) => {
-  if (req.body.username === process.env.ADMIN_LOGIN &&
-      req.body.password === process.env.ADMIN_PASSWORD) {
-    req.session.auth = true;
+  if (req.session.auth && req.session.isAdmin) {
     return res.redirect('/dashboard');
   }
-  res.redirect('/login?error=Неверный логин или пароль');
+  const error = req.query.error || '';
+  res.sendFile(path.join(__dirname, 'public', 'login.html'));
+});
+
+app.get('/register', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'register.html'));
+});
+
+app.post('/register', express.json(), async (req, res) => {
+  const { username, email, password } = req.body;
+  
+  if (!username || !email || !password) {
+    return res.status(400).json({ error: 'Все поля обязательны для заполнения' });
+  }
+  
+  if (password.length < 6) {
+    return res.status(400).json({ error: 'Пароль должен содержать не менее 6 символов' });
+  }
+  
+  try {
+    // Check if user already exists
+    const existingUser = db.prepare('SELECT id FROM users WHERE username = ? OR email = ?').get(username, email);
+    if (existingUser) {
+      return res.status(400).json({ error: 'Пользователь с таким именем или email уже существует' });
+    }
+    
+    // Hash password and create user
+    const hashedPassword = require('crypto').createHash('sha256').update(password).digest('hex');
+    db.prepare('INSERT INTO users (username, email, password_hash, created_at) VALUES (?, ?, ?, ?)')
+      .run(username, email, hashedPassword, new Date().toISOString());
+    
+    res.status(200).json({ success: true, message: 'Регистрация успешна' });
+  } catch (error) {
+    console.error('Registration error:', error);
+    res.status(500).json({ error: 'Ошибка сервера при регистрации' });
+  }
+});
+
+app.post('/login', express.json(), async (req, res) => {
+  const { username, password } = req.body;
+  
+  if (!username || !password) {
+    return res.status(400).json({ error: 'Все поля обязательны для заполнения' });
+  }
+  
+  // First, try to authenticate as regular user
+  try {
+    const user = db.prepare('SELECT * FROM users WHERE username = ? OR email = ?').get(username, username);
+    if (user) {
+      const hashedPassword = require('crypto').createHash('sha256').update(password).digest('hex');
+      if (hashedPassword === user.password_hash) {
+        req.session.userId = user.id;
+        req.session.username = user.username;
+        req.session.auth = true;
+        req.session.isAdmin = false;
+        
+        return res.status(200).json({ success: true, message: 'Успешный вход' });
+      }
+    }
+    
+    // If not a regular user, try admin login
+    if (username === process.env.ADMIN_LOGIN && password === process.env.ADMIN_PASSWORD) {
+      req.session.auth = true;
+      req.session.isAdmin = true;
+      return res.status(200).json({ success: true, message: 'Успешный вход в админку' });
+    }
+    
+    res.status(401).json({ error: 'Неверные учетные данные' });
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({ error: 'Ошибка сервера при входе' });
+  }
 });
 
 function requireAuth(req, res, next) {
+  if (req.session.auth && req.session.isAdmin) return next();
+  res.redirect('/login');
+}
+
+function requireUserOrAdmin(req, res, next) {
   if (req.session.auth) return next();
   res.redirect('/login');
 }
@@ -1300,8 +1335,54 @@ app.post('/chat/:orderId/close', requireAuth, (req, res) => {
 });
 
 app.get('/logout', (req, res) => {
-  req.session.destroy();
-  res.redirect('/login');
+  req.session.destroy((err) => {
+    if (err) {
+      console.error('Session destroy error:', err);
+    }
+    res.redirect('/');
+  });
+});
+
+// Profile page
+app.get('/profile', requireUserOrAdmin, (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'profile.html'));
+});
+
+// API for user profile
+app.get('/api/profile', requireUserOrAdmin, (req, res) => {
+  if (!req.session.userId) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  
+  const user = db.prepare('SELECT username, email, created_at FROM users WHERE id = ?').get(req.session.userId);
+  if (!user) {
+    return res.status(404).json({ error: 'User not found' });
+  }
+  
+  // Get user balance from Telegram bot integration (fallback to 0 if not found)
+  const userBalance = models.getUserBalance(req.session.userId) || 0;
+  
+  res.json({
+    ...user,
+    balance: userBalance
+  });
+});
+
+// API for user orders
+app.get('/api/orders', requireUserOrAdmin, (req, res) => {
+  if (!req.session.userId) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  
+  const orders = db.prepare(`
+    SELECT o.*, p.name as product_name, p.price
+    FROM orders o
+    JOIN products p ON o.product_id = p.id
+    WHERE o.user_id = ?
+    ORDER BY o.created_at DESC
+  `).all(req.session.userId);
+  
+  res.json(orders);
 });
 
 // API для получения статистики сайта

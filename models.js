@@ -80,8 +80,6 @@ function getUserById(userId) {
 function getUserBalance(userId) {
   const user = getUserById(userId);
   if (!user) {
-    // Если пользователя нет в базе, создаем его с нулевым балансом
-    db.prepare('INSERT INTO users (id, balance) VALUES (?, 0)').run(userId);
     return 0;
   }
   return user.balance || 0;
@@ -89,7 +87,7 @@ function getUserBalance(userId) {
 
 // Обновить баланс пользователя
 function updateUserBalance(userId, newBalance) {
-  db.prepare('INSERT OR REPLACE INTO users (id, balance) VALUES (?, ?)').run(userId, newBalance);
+  db.prepare('UPDATE users SET balance = ? WHERE id = ?').run(newBalance, userId);
 }
 
 // ЭКСПОРТ ВСЕХ ФУНКЦИЙ
